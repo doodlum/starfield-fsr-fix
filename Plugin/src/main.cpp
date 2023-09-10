@@ -10,18 +10,18 @@ typedef int32_t FfxErrorCode;
 
 typedef struct FfxFsr2Interface
 {
-	void* fpCreateBackendContext;                                ///< A callback function to create and initialize the backend context.
-	void* fpGetDeviceCapabilities;                               ///< A callback function to query device capabilites.
-	void* fpDestroyBackendContext;                               ///< A callback function to destroy the backendcontext. This also dereferences the device.
-	void* fpCreateResource;                                      ///< A callback function to create a resource.
-	void* fpRegisterResource;                                    ///< A callback function to register an external resource.
-	void* fpUnregisterResources;                                 ///< A callback function to unregister external resource.
-	void* fpGetResourceDescription;                              ///< A callback function to retrieve a resource description.
-	void* fpDestroyResource;                                     ///< A callback function to destroy a resource.
-	void* fpCreatePipeline;                                      ///< A callback function to create a render or compute pipeline.
-	void* fpDestroyPipeline;                                     ///< A callback function to destroy a render or compute pipeline.
-	void* fpScheduleGpuJob;                                      ///< A callback function to schedule a render job.
-	void* fpExecuteGpuJobs;                                      ///< A callback function to execute all queued render jobs.
+	void* fpCreateBackendContext;    ///< A callback function to create and initialize the backend context.
+	void* fpGetDeviceCapabilities;   ///< A callback function to query device capabilites.
+	void* fpDestroyBackendContext;   ///< A callback function to destroy the backendcontext. This also dereferences the device.
+	void* fpCreateResource;          ///< A callback function to create a resource.
+	void* fpRegisterResource;        ///< A callback function to register an external resource.
+	void* fpUnregisterResources;     ///< A callback function to unregister external resource.
+	void* fpGetResourceDescription;  ///< A callback function to retrieve a resource description.
+	void* fpDestroyResource;         ///< A callback function to destroy a resource.
+	void* fpCreatePipeline;          ///< A callback function to create a render or compute pipeline.
+	void* fpDestroyPipeline;         ///< A callback function to destroy a render or compute pipeline.
+	void* fpScheduleGpuJob;          ///< A callback function to schedule a render job.
+	void* fpExecuteGpuJobs;          ///< A callback function to execute all queued render jobs.
 
 	void* scratchBuffer;       ///< A preallocated buffer for memory utilized internally by the backend.
 	size_t scratchBufferSize;  ///< Size of the buffer pointed to by <c><i>scratchBuffer</i></c>.
@@ -68,7 +68,6 @@ typedef struct FfxFsr2DispatchDescription
 	float autoTcScale;            ///< A value to scale the transparency and composition mask
 	float autoReactiveScale;      ///< A value to scale the reactive mask
 	float autoReactiveMax;        ///< A value to clamp the reactive mask
-
 } FfxFsr2DispatchDescription;
 
 static float* fMipBias = nullptr;
@@ -84,6 +83,26 @@ void DrawMenu(reshade::api::effect_runtime*)
 	ImGui::Checkbox("Disable (for testing only)", &_forceDisable);
 }
 
+void AdjustBias(FfxFsr2DispatchDescription* dispatchParams)
+{
+	float renderResolutionX = dispatchParams->renderSize.width;
+	float displayResolutionX = _displaySize.width;
+
+	float bias = log2(renderResolutionX / displayResolutionX) - 0.5f;
+	float clampedBias = std::clamp(bias, -2.0f, 0.0f);
+
+	static bool erroredBefore = false;
+	if (bias != clampedBias && !erroredBefore) {
+		erroredBefore = true;
+		ERROR("Upscaling Fix BAD VALUE : renderResolutionX {} displayResolutionX {} bias {}", renderResolutionX, displayResolutionX, bias);
+	}
+
+	*fMipBias = clampedBias;
+
+	if (_forceDisable)
+		*fMipBias = 0;
+}
+
 namespace Microsoft
 {
 	FfxErrorCode ffxFsr2ContextCreate_detour(void* context, FfxFsr2ContextDescription* contextDescription);
@@ -92,50 +111,9 @@ namespace Microsoft
 
 	FfxErrorCode ffxFsr2ContextCreate_detour(void* context, FfxFsr2ContextDescription* contextDescription)
 	{
-		if (!_registeredAddon) {
-			_registeredAddon = true;
-
-			if (reshade::register_addon(_hModule)) {
-				INFO("Registered ReShade addon, adding menu");
-				reshade::register_overlay(nullptr, &DrawMenu);
-			}
-			else {
-				INFO("Failed to register ReShade addon, not adding menu");
-			}
-		}
 		_displaySize = contextDescription->displaySize;
 		INFO("Initial displaySize {} {}", _displaySize.width, _displaySize.height);
 
-		return (ffxFsr2ContextCreate_original)(context, contextDescription);
-	}
-
-	FfxErrorCode ffxFsr2ContextDispatch_detour(void* context, FfxFsr2DispatchDescription* dispatchParams);
-
-	decltype(&ffxFsr2ContextDispatch_detour) ffxFsr2ContextDispatch_original;
-
-	FfxErrorCode ffxFsr2ContextDispatch_detour(void* context, FfxFsr2DispatchDescription* dispatchParams)
-	{
-		float renderResolution = dispatchParams->renderSize.width + dispatchParams->renderSize.height;
-		float displayResolution = _displaySize.width + _displaySize.height;
-
-		*fMipBias = log2(renderResolution / displayResolution) - 1.0f;
-
-		if (_forceDisable)
-			*fMipBias = 0;
-
-		return (ffxFsr2ContextDispatch_original)(context, dispatchParams);
-	}
-}
-
-
-namespace Steam
-{
-	FfxErrorCode ffxFsr2ContextCreate_hook(void* context, FfxFsr2ContextDescription* contextDescription);
-
-	decltype(&ffxFsr2ContextCreate_hook) ffxFsr2ContextCreate_original;
-
-	FfxErrorCode ffxFsr2ContextCreate_hook(void* context, FfxFsr2ContextDescription* contextDescription)
-	{
 		if (!_registeredAddon) {
 			_registeredAddon = true;
 
@@ -146,8 +124,42 @@ namespace Steam
 				INFO("Failed to register ReShade addon, not adding menu");
 			}
 		}
+
+		return (ffxFsr2ContextCreate_original)(context, contextDescription);
+	}
+
+	FfxErrorCode ffxFsr2ContextDispatch_detour(void* context, FfxFsr2DispatchDescription* dispatchParams);
+
+	decltype(&ffxFsr2ContextDispatch_detour) ffxFsr2ContextDispatch_original;
+
+	FfxErrorCode ffxFsr2ContextDispatch_detour(void* context, FfxFsr2DispatchDescription* dispatchParams)
+	{
+		AdjustBias(dispatchParams);
+		return (ffxFsr2ContextDispatch_original)(context, dispatchParams);
+	}
+}
+
+namespace Steam
+{
+	FfxErrorCode ffxFsr2ContextCreate_hook(void* context, FfxFsr2ContextDescription* contextDescription);
+
+	decltype(&ffxFsr2ContextCreate_hook) ffxFsr2ContextCreate_original;
+
+	FfxErrorCode ffxFsr2ContextCreate_hook(void* context, FfxFsr2ContextDescription* contextDescription)
+	{
 		_displaySize = contextDescription->displaySize;
 		INFO("Initial displaySize {} {}", _displaySize.width, _displaySize.height);
+
+		if (!_registeredAddon) {
+			_registeredAddon = true;
+
+			if (reshade::register_addon(_hModule)) {
+				INFO("Registered ReShade addon, adding menu");
+				reshade::register_overlay(nullptr, &DrawMenu);
+			} else {
+				INFO("Failed to register ReShade addon, not adding menu");
+			}
+		}
 
 		return (ffxFsr2ContextCreate_original)(context, contextDescription);
 	}
@@ -158,14 +170,7 @@ namespace Steam
 
 	FfxErrorCode ffxFsr2ContextDispatch_hook(void* context, FfxFsr2DispatchDescription* dispatchParams)
 	{
-		float renderResolution = dispatchParams->renderSize.width + dispatchParams->renderSize.height;
-		float displayResolution = _displaySize.width + _displaySize.height;
-
-		*fMipBias = log2(renderResolution / displayResolution) - 0.5f;
-
-		if (_forceDisable)
-			*fMipBias = 0;
-
+		AdjustBias(dispatchParams);
 		return (ffxFsr2ContextDispatch_original)(context, dispatchParams);
 	}
 }
@@ -198,7 +203,6 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD dwReason, LPVOID)
 
 			Steam::ffxFsr2ContextCreate_original = dku::Hook::write_call<5>(ffxFsr2ContextCreateFunc, Steam::ffxFsr2ContextCreate_hook);
 			Steam::ffxFsr2ContextDispatch_original = dku::Hook::write_call<5>(ffxFsr2ContextDispatchFunc, Steam::ffxFsr2ContextDispatch_hook);
-
 		} else  // Microsoft Store
 		{
 			auto base = GetModuleHandleA(nullptr);
