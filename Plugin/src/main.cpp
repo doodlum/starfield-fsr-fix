@@ -161,7 +161,7 @@ namespace Steam
 		float renderResolution = dispatchParams->renderSize.width + dispatchParams->renderSize.height;
 		float displayResolution = _displaySize.width + _displaySize.height;
 
-		*fMipBias = log2(renderResolution / displayResolution) - 1.0f;
+		*fMipBias = log2(renderResolution / displayResolution) - 0.5f;
 
 		if (_forceDisable)
 			*fMipBias = 0;
