@@ -88,8 +88,8 @@ void AdjustBias(FfxFsr2DispatchDescription* dispatchParams)
 	float renderResolutionX = dispatchParams->renderSize.width;
 	float displayResolutionX = _displaySize.width;
 
-	float bias = log2(renderResolutionX / displayResolutionX) - 0.5f;
-	float clampedBias = std::clamp(bias, -2.0f, 0.0f);
+	float bias = log2(renderResolutionX / displayResolutionX);
+	float clampedBias = std::clamp(bias, -10.0f, 0.0f);
 
 	static bool erroredBefore = false;
 	if (bias != clampedBias && !erroredBefore) {
