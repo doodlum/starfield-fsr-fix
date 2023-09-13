@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.21)
 # info
 project(
 	UpscalingFix
-	VERSION 1.0.4
+	VERSION 1.1.0
 	LANGUAGES CXX
 )
 
@@ -67,8 +67,6 @@ target_link_libraries(
 	PRIVATE
 		DKUtil::DKUtil
 		spdlog::spdlog
-		debug ${CMAKE_CURRENT_SOURCE_DIR}/src/detours/Debug/detours.lib
-		optimized ${CMAKE_CURRENT_SOURCE_DIR}/src/detours/Release/detours.lib
 )
 
 # compiler def
