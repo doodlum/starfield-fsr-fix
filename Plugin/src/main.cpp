@@ -4,8 +4,6 @@
 #include <imgui.h>
 #include <reshade/reshade.hpp>
 
-#include "detours/Detours.h"
-
 typedef int32_t FfxErrorCode;
 
 typedef struct FfxFsr2Interface
@@ -190,7 +188,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD dwReason, LPVOID)
 				ERROR("Failed to find ffxFsr2ContextDispatch!")
 			}
 			ffxFsr2ContextDispatch_original = dku::Hook::write_call<5>(AsAddress(scan) + 0xC, ffxFsr2ContextDispatch_hook);
-			INFO("Found ffxFsr2ContextDispatch {:X}", AsAddress(scan) + 0xC - dku::Hook::Module::get().base() + 0x140000000);
+			INFO("Found ffxFsr2ContextDispatch at {:X}", AsAddress(scan) + 0xC - dku::Hook::Module::get().base() + 0x140000000);
 		}
 
 	}
