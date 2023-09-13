@@ -103,76 +103,48 @@ void AdjustBias(FfxFsr2DispatchDescription* dispatchParams)
 		*fMipBias = 0;
 }
 
-namespace Microsoft
+FfxErrorCode ffxFsr2ContextCreate_hook(void* context, FfxFsr2ContextDescription* contextDescription);
+
+decltype(&ffxFsr2ContextCreate_hook) ffxFsr2ContextCreate_original;
+
+FfxErrorCode ffxFsr2ContextCreate_hook(void* context, FfxFsr2ContextDescription* contextDescription)
 {
-	FfxErrorCode ffxFsr2ContextCreate_detour(void* context, FfxFsr2ContextDescription* contextDescription);
+	_displaySize = contextDescription->displaySize;
+	INFO("Initial displaySize {} {}", _displaySize.width, _displaySize.height);
 
-	decltype(&ffxFsr2ContextCreate_detour) ffxFsr2ContextCreate_original;
+	if (!_registeredAddon) {
+		_registeredAddon = true;
 
-	FfxErrorCode ffxFsr2ContextCreate_detour(void* context, FfxFsr2ContextDescription* contextDescription)
-	{
-		_displaySize = contextDescription->displaySize;
-		INFO("Initial displaySize {} {}", _displaySize.width, _displaySize.height);
-
-		if (!_registeredAddon) {
-			_registeredAddon = true;
-
-			if (reshade::register_addon(_hModule)) {
-				INFO("Registered ReShade addon, adding menu");
-				reshade::register_overlay(nullptr, &DrawMenu);
-			} else {
-				INFO("Failed to register ReShade addon, not adding menu");
-			}
+		if (reshade::register_addon(_hModule)) {
+			INFO("Registered ReShade addon, adding menu");
+			reshade::register_overlay(nullptr, &DrawMenu);
+		} else {
+			INFO("Failed to register ReShade addon, not adding menu");
 		}
-
-		return (ffxFsr2ContextCreate_original)(context, contextDescription);
 	}
 
-	FfxErrorCode ffxFsr2ContextDispatch_detour(void* context, FfxFsr2DispatchDescription* dispatchParams);
-
-	decltype(&ffxFsr2ContextDispatch_detour) ffxFsr2ContextDispatch_original;
-
-	FfxErrorCode ffxFsr2ContextDispatch_detour(void* context, FfxFsr2DispatchDescription* dispatchParams)
-	{
-		AdjustBias(dispatchParams);
-		return (ffxFsr2ContextDispatch_original)(context, dispatchParams);
-	}
+	return (ffxFsr2ContextCreate_original)(context, contextDescription);
 }
 
-namespace Steam
+FfxErrorCode ffxFsr2ContextDispatch_hook(void* context, FfxFsr2DispatchDescription* dispatchParams);
+
+decltype(&ffxFsr2ContextDispatch_hook) ffxFsr2ContextDispatch_original;
+
+FfxErrorCode ffxFsr2ContextDispatch_hook(void* context, FfxFsr2DispatchDescription* dispatchParams)
 {
-	FfxErrorCode ffxFsr2ContextCreate_hook(void* context, FfxFsr2ContextDescription* contextDescription);
+	AdjustBias(dispatchParams);
+	return (ffxFsr2ContextDispatch_original)(context, dispatchParams);
+}
 
-	decltype(&ffxFsr2ContextCreate_hook) ffxFsr2ContextCreate_original;
+void AddINISetting_fMipBias_hook(void* setting, char* name_section);
 
-	FfxErrorCode ffxFsr2ContextCreate_hook(void* context, FfxFsr2ContextDescription* contextDescription)
-	{
-		_displaySize = contextDescription->displaySize;
-		INFO("Initial displaySize {} {}", _displaySize.width, _displaySize.height);
+decltype(&AddINISetting_fMipBias_hook) AddINISetting_fMipBias_original;
 
-		if (!_registeredAddon) {
-			_registeredAddon = true;
-
-			if (reshade::register_addon(_hModule)) {
-				INFO("Registered ReShade addon, adding menu");
-				reshade::register_overlay(nullptr, &DrawMenu);
-			} else {
-				INFO("Failed to register ReShade addon, not adding menu");
-			}
-		}
-
-		return (ffxFsr2ContextCreate_original)(context, contextDescription);
-	}
-
-	FfxErrorCode ffxFsr2ContextDispatch_hook(void* context, FfxFsr2DispatchDescription* dispatchParams);
-
-	decltype(&ffxFsr2ContextDispatch_hook) ffxFsr2ContextDispatch_original;
-
-	FfxErrorCode ffxFsr2ContextDispatch_hook(void* context, FfxFsr2DispatchDescription* dispatchParams)
-	{
-		AdjustBias(dispatchParams);
-		return (ffxFsr2ContextDispatch_original)(context, dispatchParams);
-	}
+void AddINISetting_fMipBias_hook(void* setting, char* name_section)
+{
+	fMipBias = reinterpret_cast<float*>(AsAddress(setting) + 8);
+	INFO("Found fMipBias at {:X}", AsAddress(fMipBias) - dku::Hook::Module::get().base() + 0x140000000);
+	return (AddINISetting_fMipBias_original)(setting, name_section);
 }
 
 extern "C" DLLEXPORT const char* NAME = "Upscaling Fix for Starfield";
@@ -192,28 +164,35 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD dwReason, LPVOID)
 
 		INFO("{} v{} loaded", Plugin::NAME, Plugin::Version);
 
-		if (GetModuleHandleA("steam_api64.dll"))  // Steam
+		dku::Hook::Trampoline::AllocTrampoline(42);
+
 		{
-			fMipBias = reinterpret_cast<float*>((DKUtil::Hook::Module::get().base() + 0x1455FDE70 - 0x140000000) + 8);
-
-			const auto ffxFsr2ContextCreateFunc = AsAddress(dku::Hook::Module::get().base() + 0x143330680 + 0x163 - 0x140000000);
-			const auto ffxFsr2ContextDispatchFunc = AsAddress(dku::Hook::Module::get().base() + 0x14332FE70 + 0x76E - 0x140000000);
-
-			dku::Hook::Trampoline::AllocTrampoline(28);
-
-			Steam::ffxFsr2ContextCreate_original = dku::Hook::write_call<5>(ffxFsr2ContextCreateFunc, Steam::ffxFsr2ContextCreate_hook);
-			Steam::ffxFsr2ContextDispatch_original = dku::Hook::write_call<5>(ffxFsr2ContextDispatchFunc, Steam::ffxFsr2ContextDispatch_hook);
-		} else  // Microsoft Store
-		{
-			auto base = GetModuleHandleA(nullptr);
-
-			fMipBias = reinterpret_cast<float*>((DKUtil::Hook::Module::get().base() + 0x145620ED0 - 0x140000000) + 8);
-			auto ffxFsr2ContextCreateFunc = GetProcAddress(base, "ffxFsr2ContextCreate");
-			auto ffxFsr2ContextDispatchFunc = GetProcAddress(base, "ffxFsr2ContextDispatch");
-
-			*(uintptr_t*)&Microsoft::ffxFsr2ContextCreate_original = Detours::X64::DetourFunction(AsAddress(ffxFsr2ContextCreateFunc), AsAddress(&Microsoft::ffxFsr2ContextCreate_detour));
-			*(uintptr_t*)&Microsoft::ffxFsr2ContextDispatch_original = Detours::X64::DetourFunction(AsAddress(ffxFsr2ContextDispatchFunc), AsAddress(&Microsoft::ffxFsr2ContextDispatch_detour));
+			const auto scan = static_cast<uint8_t*>(dku::Hook::Assembly::search_pattern<"E8 ?? ?? ?? ?? 48 8D 0D ?? ?? ?? ?? 48 83 C4 28 E9 ?? ?? ?? ?? CC CC CC CC CC 48 83 EC 18">());
+			if (!scan) {
+				ERROR("Failed to find AddINISetting_fMipBias_hook!")
+			}
+			AddINISetting_fMipBias_original = dku::Hook::write_call<5>(AsAddress(scan), AddINISetting_fMipBias_hook);
+			INFO("Found AddINISetting_fMipBias_hook at {:X}", AsAddress(scan) - dku::Hook::Module::get().base() + 0x140000000);
 		}
+			
+		{
+			const auto scan = static_cast<uint8_t*>(dku::Hook::Assembly::search_pattern<"48 8B 49 10 E8 ?? ?? ?? ?? 48 81 C4 ?? ?? ?? ??">());
+			if (!scan) {
+				ERROR("Failed to find ffxFsr2ContextCreate!")
+			}
+			ffxFsr2ContextCreate_original = dku::Hook::write_call<5>(AsAddress(scan) + 0x4, ffxFsr2ContextCreate_hook);
+			INFO("Found ffxFsr2ContextCreate at {:X}", AsAddress(scan) + 0x4 - dku::Hook::Module::get().base() + 0x140000000);
+		}
+					
+		{
+			const auto scan = static_cast<uint8_t*>(dku::Hook::Assembly::search_pattern<"89 9D 20 07 00 00 88 85 38 07 00 00 E8 ?? ?? ?? ??">());
+			if (!scan) {
+				ERROR("Failed to find ffxFsr2ContextDispatch!")
+			}
+			ffxFsr2ContextDispatch_original = dku::Hook::write_call<5>(AsAddress(scan) + 0xC, ffxFsr2ContextDispatch_hook);
+			INFO("Found ffxFsr2ContextDispatch {:X}", AsAddress(scan) + 0xC - dku::Hook::Module::get().base() + 0x140000000);
+		}
+
 	}
 	return TRUE;
 }
